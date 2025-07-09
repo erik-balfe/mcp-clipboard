@@ -41,7 +41,11 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Before version update:"
+          cat package.json | head -10
           sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" package.json
+          echo "After version update:"
+          cat package.json | head -10
           [ -f jsr.json ] && sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" jsr.json || echo "jsr.json not found, skipping"
       
       - name: Run tests
