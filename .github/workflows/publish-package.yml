@@ -68,7 +68,7 @@ jobs:
         run: bun test
       
       - name: Build package
-        run: bun run prepare
+        run: npm run prepare
       
       - name: Verify build output
         run: |
