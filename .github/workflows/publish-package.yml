@@ -1,0 +1,119 @@
+name: Publish Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 1.0.3)'
+        required: true
+        default: '1.0.3'
+
+jobs:
+  publish-jsr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # Required for JSR publishing
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.2.18'
+      
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      
+      - name: Update version in package.json
+        if: github.event.inputs.version
+        run: |
+          bun run -e "
+          const pkg = JSON.parse(await Bun.file('package.json').text());
+          pkg.version = '${{ github.event.inputs.version }}';
+          await Bun.write('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+      
+      - name: Update version in jsr.json
+        if: github.event.inputs.version
+        run: |
+          bun run -e "
+          const jsr = JSON.parse(await Bun.file('jsr.json').text());
+          jsr.version = '${{ github.event.inputs.version }}';
+          await Bun.write('jsr.json', JSON.stringify(jsr, null, 2) + '\n');
+          "
+      
+      - name: Extract version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          bun run -e "
+          const pkg = JSON.parse(await Bun.file('package.json').text());
+          pkg.version = '$VERSION';
+          await Bun.write('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          bun run -e "
+          const jsr = JSON.parse(await Bun.file('jsr.json').text());
+          jsr.version = '$VERSION';
+          await Bun.write('jsr.json', JSON.stringify(jsr, null, 2) + '\n');
+          "
+      
+      - name: Run tests
+        run: bun test
+      
+      - name: Build package
+        run: bun run prepare
+      
+      - name: Verify build output
+        run: |
+          echo "Checking build output..."
+          ls -la dist/
+          head -5 dist/server.js
+      
+      - name: Publish to JSR
+        run: bunx jsr publish --allow-dirty
+      
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          name: Release ${{ env.VERSION }}
+          body: |
+            ## MCP Clipboard Server ${{ env.VERSION }}
+            
+            ### Installation Methods
+            
+            #### JSR Package (Bun Required)
+            ```bash
+            bunx @tyr/mcp-clipboard
+            ```
+            
+            #### Docker (Universal)
+            ```bash
+            docker run -d --name mcp-clipboard \
+              -v $(pwd)/data:/app/data \
+              ghcr.io/erik-balfe/mcp-clipboard:${{ env.VERSION }}
+            ```
+            
+            ### Changes
+            - Package published to JSR registry
+            - Docker image available at ghcr.io/erik-balfe/mcp-clipboard
+            - Optimized Bun 1.2.18+ runtime
+            - Cross-platform file handling with Docker volumes
+            
+            See [DOCKER.md](./DOCKER.md) for detailed installation instructions.
+          draft: false
+          prerelease: false
+          files: |
+            ./dist/server.js
+            ./README.md
+            ./LICENSE
