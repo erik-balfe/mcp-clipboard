@@ -1,0 +1,36 @@
+{
+  "name": "mcp-clipboard",
+  "version": "1.0.0",
+  "description": "MCP server for clipboard management with persistent storage, search, and advanced features",
+  "main": "dist/server.js",
+  "module": "index.ts",
+  "type": "module",
+  "private": false,
+  "bin": {
+    "mcp-clipboard": "./dist/server.js"
+  },
+  "scripts": {
+    "build": "bun build src/server.ts --outdir dist --target node --format esm",
+    "start": "bun run src/server.ts",
+    "dev": "bun --watch src/server.ts",
+    "test": "bun test"
+  },
+  "keywords": [
+    "mcp",
+    "clipboard",
+    "model-context-protocol",
+    "ai-tools",
+    "clipboard-manager"
+  ],
+  "author": "Claude Code",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.15.0"
+  }
+}

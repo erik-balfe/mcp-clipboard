@@ -1,0 +1,55 @@
+# dependencies (bun install)
+node_modules
+
+# output
+out
+dist
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+_.log
+report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+
+# dotenv environment variable files
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IntelliJ based IDEs
+.idea
+
+# Finder (MacOS) folder config
+.DS_Store
+
+# Database files (for development/testing)
+*.db
+*.db-wal
+*.db-shm
+
+# Debug files
+debug-*.ts
+
+# VS Code
+.vscode/
+
+# Local development files (don't publish)
+claude-desktop-config.json
+CODE_REVIEW.md
+SECURITY_FIXES_APPLIED.md
+.gitlab-ci.yml
+Dockerfile
+
+# Jujutsu directory
+.jj/

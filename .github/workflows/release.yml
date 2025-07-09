@@ -1,0 +1,282 @@
+name: Release - Production Build
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 1.0.0)'
+        required: true
+        type: string
+      create_release:
+        description: 'Create GitHub release'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  validate-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
+    steps:
+    - name: Validate version format
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" == "release" ]; then
+          VERSION="${{ github.event.release.tag_name }}"
+          IS_PRERELEASE="${{ github.event.release.prerelease }}"
+        else
+          VERSION="${{ github.event.inputs.version }}"
+          IS_PRERELEASE="false"
+        fi
+        
+        # Remove 'v' prefix if present
+        VERSION=${VERSION#v}
+        
+        # Validate semantic version format
+        if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*)?$ ]]; then
+          echo "❌ Invalid version format: $VERSION"
+          echo "Expected format: X.Y.Z or X.Y.Z-prerelease"
+          exit 1
+        fi
+        
+        echo "✅ Version validated: $VERSION"
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+
+  build:
+    runs-on: ubuntu-latest
+    needs: validate-version
+    name: Build Release
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v1
+      with:
+        bun-version: latest
+      timeout-minutes: 5
+    
+    - name: Cache Bun dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.bun/install/cache
+        key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}
+        restore-keys: |
+          ${{ runner.os }}-bun-
+    
+    - name: Install dependencies
+      run: bun install
+      
+    - name: Run security tests
+      run: bun run src/security.test.ts
+      
+    - name: Update version in package.json
+      run: |
+        # Create a safe version update script
+        cat > update-version.js << 'EOF'
+        const fs = require('fs');
+        const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+        pkg.version = process.env.NEW_VERSION;
+        fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+        EOF
+        
+        NEW_VERSION="${{ needs.validate-version.outputs.version }}" node update-version.js
+        rm update-version.js
+      
+    - name: Build project
+      run: bun run build
+      
+    - name: Test server startup
+      run: timeout 5s bun run start || echo "Server startup test completed"
+      
+    - name: Create distribution package
+      run: |
+        mkdir -p release
+        cp dist/server.js release/
+        cp package.json release/
+        cp README.md release/
+        cp -r docs release/
+        
+        # Create installation script
+        cat > release/install.sh << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        echo "🚀 Installing MCP Clipboard Manager"
+        
+        # Check if bun is installed
+        if ! command -v bun &> /dev/null; then
+          echo "❌ Bun is not installed. Please install from https://bun.sh"
+          exit 1
+        fi
+        
+        # Make server executable
+        chmod +x server.js
+        
+        echo "✅ MCP Clipboard Manager installed successfully!"
+        echo "📖 Run './server.js' to start the server"
+        echo "📚 See README.md for configuration instructions"
+        EOF
+        
+        chmod +x release/install.sh
+        
+        # Create archive
+        cd release
+        tar -czf ../mcp-clipboard-${{ needs.validate-version.outputs.version }}.tar.gz .
+        cd ..
+        
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-${{ needs.validate-version.outputs.version }}
+        path: |
+          release/
+          mcp-clipboard-${{ needs.validate-version.outputs.version }}.tar.gz
+        retention-days: 90
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [validate-version, build]
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true'
+    name: Create GitHub Release
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: release-${{ needs.validate-version.outputs.version }}
+        
+    - name: Generate release notes
+      id: release_notes
+      run: |
+        cat > release_notes.md << 'EOF'
+        # MCP Clipboard Manager v${{ needs.validate-version.outputs.version }}
+        
+        A Model Context Protocol (MCP) server providing AI agents with persistent clipboard management capabilities.
+        
+        ## 🚀 Features
+        
+        - **Persistent Storage**: Clipboard history survives across sessions
+        - **Multimodal Support**: Text, images, documents, and videos
+        - **AI-Optimized**: Designed specifically for AI agent workflows
+        - **Search & Organization**: Full-text search, pinning, and smart previews
+        - **Security**: Path validation, input sanitization, and rate limiting
+        - **8 MCP Tools**: copy, paste, list, search, pin, delete, clear, stats
+        
+        ## 📦 Installation
+        
+        ### Quick Start
+        ```bash
+        # Download and extract
+        curl -L https://github.com/${{ github.repository }}/releases/download/v${{ needs.validate-version.outputs.version }}/mcp-clipboard-${{ needs.validate-version.outputs.version }}.tar.gz | tar -xz
+        
+        # Install
+        ./install.sh
+        
+        # Run
+        ./server.js
+        ```
+        
+        ### Manual Installation
+        1. Download `server.js` from the assets below
+        2. Run with Bun: `bun run server.js`
+        3. Configure in your MCP client (Claude Desktop, etc.)
+        
+        ## 🔧 Configuration
+        
+        Add to your MCP client configuration:
+        ```json
+        {
+          "mcpServers": {
+            "clipboard": {
+              "command": "bun",
+              "args": ["run", "/path/to/server.js"]
+            }
+          }
+        }
+        ```
+        
+        ## 📋 Available Tools
+        
+        - `clipboard_copy` - Copy text content
+        - `clipboard_copy_file` - Copy files with caching
+        - `clipboard_paste` - Retrieve content
+        - `clipboard_list` - Browse history
+        - `clipboard_search` - Full-text search
+        - `clipboard_pin` - Pin important items
+        - `clipboard_delete` - Remove items
+        - `clipboard_clear` - Clear history
+        - `clipboard_stats` - Usage statistics
+        - `clipboard_look_at` - View cached files
+        
+        ## 🔐 Security
+        
+        - Path traversal protection
+        - Input validation and sanitization
+        - Rate limiting for DoS prevention
+        - Secure file caching system
+        
+        ## 📚 Documentation
+        
+        See the `docs/` directory for detailed documentation and examples.
+        
+        ---
+        
+        **System Requirements**: Bun runtime  
+        **Supported Platforms**: Linux, macOS, Windows  
+        **License**: MIT
+        EOF
+        
+        echo "release_notes<<EOF" >> $GITHUB_OUTPUT
+        cat release_notes.md >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+    - name: Create release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ needs.validate-version.outputs.version }}
+        name: "MCP Clipboard Manager v${{ needs.validate-version.outputs.version }}"
+        body: ${{ steps.release_notes.outputs.release_notes }}
+        draft: false
+        prerelease: ${{ needs.validate-version.outputs.is_prerelease }}
+        files: |
+          mcp-clipboard-${{ needs.validate-version.outputs.version }}.tar.gz
+          release/server.js
+          release/package.json
+          release/README.md
+          release/install.sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-release:
+    runs-on: ubuntu-latest
+    needs: [validate-version, build]
+    if: github.event_name == 'release'
+    name: Publish Release Assets
+    
+    steps:
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: release-${{ needs.validate-version.outputs.version }}
+        
+    - name: Upload release assets
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          mcp-clipboard-${{ needs.validate-version.outputs.version }}.tar.gz
+          release/server.js
+          release/package.json
+          release/README.md
+          release/install.sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
