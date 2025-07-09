@@ -19,49 +19,80 @@ A Model Context Protocol (MCP) server that gives AI agents like Claude a powerfu
 
 ## 🚀 Quick Start
 
-### 1. Install
-
-Choose your preferred method:
-
-#### Option A: Download Release (Recommended)
+### 1. Install Bun Runtime
 ```bash
-# Download the latest release
-curl -L https://github.com/erik/mcp-clipboard/releases/latest/download/mcp-clipboard-latest.tar.gz | tar -xz
-
-# Install
-./install.sh
-```
-
-#### Option B: Use Bun Package Manager
-```bash
-# Install Bun if you haven't already
 curl -fsSL https://bun.sh/install | bash
-
-# Run directly
-bunx mcp-clipboard
 ```
 
-### 2. Configure Your AI Client
+### 2. Download and Configure
 
-Add this to your MCP client configuration:
+#### Step 1: Download the Server
+```bash
+# Create a directory for MCP servers
+mkdir -p ~/.mcp-servers
 
-#### Claude Desktop
-Add to your `claude_desktop_config.json`:
+# Download the clipboard server
+curl -L https://github.com/erik-balfe/mcp-clipboard/releases/latest/download/server.js -o ~/.mcp-servers/mcp-clipboard-server.js
+
+# Make it executable
+chmod +x ~/.mcp-servers/mcp-clipboard-server.js
+```
+
+#### Step 2: Configure Your MCP Client
+
+**Claude Desktop** (`claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
     "clipboard": {
       "command": "bun",
-      "args": ["run", "/path/to/mcp-clipboard/dist/server.js"]
+      "args": ["run", "~/.mcp-servers/mcp-clipboard-server.js"]
     }
   }
 }
 ```
 
-#### Other MCP Clients
-Point your MCP client to the `dist/server.js` file using the Bun runtime.
+**Claude Code** (`claude_code_config.json`):
+```json
+{
+  "mcpServers": {
+    "clipboard": {
+      "command": "bun",
+      "args": ["run", "~/.mcp-servers/mcp-clipboard-server.js"]
+    }
+  }
+}
+```
 
-### 3. Start Using!
+#### Alternative: Use Absolute Path
+If the `~` path doesn't work, use the full path:
+```json
+{
+  "mcpServers": {
+    "clipboard": {
+      "command": "bun",
+      "args": ["run", "/Users/yourusername/.mcp-servers/mcp-clipboard-server.js"]
+    }
+  }
+}
+```
+
+### 3. Configuration File Locations
+
+| Client | Platform | Location |
+|--------|----------|----------|
+| **Claude Desktop** | macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| **Claude Desktop** | Windows | `%AppData%\Claude\claude_desktop_config.json` |
+| **Claude Desktop** | Linux | `~/.config/claude/claude_desktop_config.json` |
+| **Claude Code** | All | Project-specific config file |
+| **VS Code** | All | VS Code settings |
+| **Cursor** | All | Cursor settings |
+
+### 4. Restart Your Client
+
+After updating the configuration, restart your MCP client (Claude Desktop, VS Code, etc.) to load the clipboard server.
+
+### 5. Start Using!
 
 Your AI agent now has access to powerful clipboard tools:
 
@@ -164,17 +195,39 @@ Default limits (configurable):
 
 ### Common Issues
 
-**"Command not found"**
-- Make sure Bun is installed and in your PATH
-- Check that the server.js file is executable
+**"Command not found: bun"**
+- Install Bun: `curl -fsSL https://bun.sh/install | bash`
+- Restart your terminal after installation
+- Check `bun --version` works
+
+**"Failed to fetch server.js"**
+- Check internet connection
+- Try downloading manually: `curl -L https://github.com/erik-balfe/mcp-clipboard/releases/latest/download/server.js -o server.js`
+- Use absolute file path in configuration
+
+**"MCP server failed to start"**
+- Check configuration file syntax (valid JSON)
+- Verify file paths are absolute, not relative
+- Test server manually: `bun run server.js`
 
 **"Database error"**
 - Ensure `~/.mcp-clipboard/` directory is writable
 - Try clearing the cache: `rm -rf ~/.mcp-clipboard/`
 
-**"MCP connection failed"**
-- Verify your client configuration
-- Check that the server starts: `bun run server.js`
+**"No clipboard tools available"**
+- Restart your MCP client after configuration changes
+- Check client logs for connection errors
+- Verify the server starts without errors
+
+### Testing Installation
+
+```bash
+# Test if Bun can run the server
+bun run ~/.mcp-servers/mcp-clipboard-server.js
+
+# Should show: "MCP Clipboard Server running on stdio"
+# Press Ctrl+C to stop the test
+```
 
 ### Get Help
 
