@@ -1,0 +1,192 @@
+name: Publish Docker Image
+
+on:
+  workflow_run:
+    workflows: ["Publish to JSR"]
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build Docker image for'
+        required: true
+        type: string
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Building Docker image for version: $VERSION"
+      
+      - name: Set version from input
+        if: github.event.inputs.version
+        run: |
+          echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_ENV
+          echo "Building Docker image for version: ${{ github.event.inputs.version }}"
+      
+      - name: Set default version
+        if: env.VERSION == ''
+        run: |
+          echo "VERSION=latest" >> $GITHUB_ENV
+          echo "Building Docker image for version: latest"
+      
+      - name: Wait for JSR package availability
+        run: |
+          echo "Waiting for JSR package to be available..."
+          for i in {1..10}; do
+            if bunx jsr show @tyr/mcp-clipboard > /dev/null 2>&1; then
+              echo "JSR package is available"
+              break
+            fi
+            echo "Attempt $i: JSR package not yet available, waiting 30 seconds..."
+            sleep 30
+          done
+      
+      - name: Create JSR-based package.json for Docker
+        run: |
+          cat > docker-package.json << 'EOF'
+          {
+            "name": "mcp-clipboard-docker",
+            "version": "1.0.0",
+            "dependencies": {
+              "@tyr/mcp-clipboard": "${{ env.VERSION == 'latest' && 'latest' || env.VERSION }}"
+            }
+          }
+          EOF
+          echo "Created Docker package.json:"
+          cat docker-package.json
+      
+      - name: Create optimized Dockerfile for JSR
+        run: |
+          cat > Dockerfile.production << 'EOF'
+          FROM oven/bun:1.2.18-slim AS base
+          WORKDIR /app
+          
+          # Install JSR package
+          COPY docker-package.json package.json
+          RUN bun install --production
+          
+          # Create non-root user
+          RUN addgroup --system --gid 1001 bun && \
+              adduser --system --uid 1001 --ingroup bun bun
+          
+          # Set up directories
+          RUN mkdir -p /app/data /host/home /host/pwd && \
+              chown -R bun:bun /app/data
+          
+          # Switch to non-root user
+          USER bun
+          
+          # Environment
+          ENV NODE_ENV=production
+          ENV MCP_CLIPBOARD_DATA_DIR=/app/data
+          
+          # Health check
+          HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+              CMD bun --version || exit 1
+          
+          # Run from JSR package
+          CMD ["bun", "run", "node_modules/@tyr/mcp-clipboard/src/server.ts"]
+          EOF
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ env.VERSION }},enable=${{ env.VERSION != 'latest' }}
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.production
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Test Docker image
+        run: |
+          echo "Testing Docker image..."
+          docker run --rm ghcr.io/${{ github.repository }}:${{ env.VERSION }} bun --version
+      
+      - name: Create deployment instructions
+        run: |
+          cat > DEPLOY.md << 'EOF'
+          # Quick Deploy Guide
+          
+          ## Using Docker Run
+          ```bash
+          docker run -d --name mcp-clipboard \
+            --restart unless-stopped \
+            -v $(pwd)/data:/app/data \
+            -v $HOME:/host/home:ro \
+            -v $(pwd):/host/pwd:rw \
+            ghcr.io/${{ github.repository }}:${{ env.VERSION }}
+          ```
+          
+          ## MCP Configuration
+          ```json
+          {
+            "mcpServers": {
+              "clipboard": {
+                "command": "docker",
+                "args": ["exec", "-i", "mcp-clipboard", "bun", "run", "node_modules/@tyr/mcp-clipboard/src/server.ts"]
+              }
+            }
+          }
+          ```
+          EOF
+      
+      - name: Summary
+        run: |
+          echo "## 🐳 Docker Images Published Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Available Images:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ghcr.io/${{ github.repository }}:${{ env.VERSION }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ghcr.io/${{ github.repository }}:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Quick Start:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "docker run -d --name mcp-clipboard \\" >> $GITHUB_STEP_SUMMARY
+          echo "  -v \$(pwd)/data:/app/data \\" >> $GITHUB_STEP_SUMMARY
+          echo "  ghcr.io/${{ github.repository }}:${{ env.VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Package Sources:" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 JSR: [@tyr/mcp-clipboard](https://jsr.io/@tyr/mcp-clipboard)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🐳 Docker: [ghcr.io/${{ github.repository }}](https://ghcr.io/${{ github.repository }})" >> $GITHUB_STEP_SUMMARY

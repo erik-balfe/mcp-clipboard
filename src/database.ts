@@ -1,6 +1,7 @@
-import { Database } from 'bun:sqlite';
+// Use Bun's native SQLite for optimal performance
+import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, copyFileSync, unlinkSync, statSync } from 'fs';
-import { join, extname, basename } from 'path';
+import { join, extname, basename, resolve, isAbsolute } from 'path';
 import { homedir } from 'os';
 import { 
   MAX_ITEMS, 
@@ -35,11 +36,16 @@ export class ClipboardDatabase {
   private dbPath: string;
   private dataDir: string;
   private cacheDir: string;
+  private isDockerEnvironment: boolean;
 
   constructor() {
-    // Store database in user's home directory
-    this.dataDir = join(homedir(), '.mcp-clipboard');
+    // Store database in data directory (supports Docker volumes)
+    const dataBaseDir = process.env.MCP_CLIPBOARD_DATA_DIR || join(homedir(), '.mcp-clipboard');
+    this.dataDir = dataBaseDir;
     this.cacheDir = join(this.dataDir, 'cache');
+    
+    // Detect if running in Docker environment
+    this.isDockerEnvironment = existsSync('/host/home') && existsSync('/host/pwd');
     
     if (!existsSync(this.dataDir)) {
       mkdirSync(this.dataDir, { recursive: true });
@@ -51,6 +57,41 @@ export class ClipboardDatabase {
     this.dbPath = join(this.dataDir, 'clipboard.db');
     this.db = new Database(this.dbPath);
     this.initializeDatabase();
+  }
+
+  // Resolve file path for Docker/native environment compatibility
+  private resolveFilePath(hostPath: string): string {
+    if (!this.isDockerEnvironment) {
+      return resolve(hostPath);
+    }
+
+    // In Docker, map host paths to container volume mounts
+    const resolvedPath = resolve(hostPath);
+    const userHome = homedir();
+    
+    // Map paths under user's home directory
+    if (resolvedPath.startsWith(userHome)) {
+      const relativePath = resolvedPath.substring(userHome.length);
+      return join('/host/home', relativePath);
+    }
+    
+    // Map paths under current working directory (if different from home)
+    const cwd = process.cwd();
+    if (resolvedPath.startsWith(cwd)) {
+      const relativePath = resolvedPath.substring(cwd.length);
+      return join('/host/pwd', relativePath);
+    }
+    
+    // For other absolute paths, try to map to /host/home first
+    if (isAbsolute(resolvedPath)) {
+      const mappedPath = join('/host/home', resolvedPath.substring(1));
+      if (existsSync(mappedPath)) {
+        return mappedPath;
+      }
+    }
+    
+    // Fallback: return original path (may not work in Docker)
+    return resolvedPath;
   }
 
   private initializeDatabase(): void {
@@ -176,12 +217,15 @@ export class ClipboardDatabase {
       throw new Error(`Invalid file path: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 
-    // Validate file exists
-    if (!existsSync(validatedPath)) {
-      throw new Error(`File not found: ${validatedPath}`);
+    // Resolve file path for Docker/native compatibility
+    const resolvedPath = this.resolveFilePath(validatedPath);
+
+    // Validate file exists (using resolved path)
+    if (!existsSync(resolvedPath)) {
+      throw new Error(`File not found: ${resolvedPath} (original: ${validatedPath})`);
     }
 
-    const stats = statSync(validatedPath);
+    const stats = statSync(resolvedPath);
     const fileSize = stats.size;
     
     // Check file size limit
@@ -189,17 +233,17 @@ export class ClipboardDatabase {
       throw new Error(`File too large: ${this.formatFileSize(fileSize)} (max: ${this.formatFileSize(MAX_FILE_SIZE)})`);
     }
 
-    const fileName = basename(validatedPath);
-    const contentType = this.getContentTypeFromFile(validatedPath);
-    const mimeType = this.getMimeType(validatedPath);
+    const fileName = basename(resolvedPath);
+    const contentType = this.getContentTypeFromFile(resolvedPath);
+    const mimeType = this.getMimeType(resolvedPath);
     
     // Generate unique cache filename
-    const ext = extname(validatedPath);
+    const ext = extname(resolvedPath);
     const cacheFileName = `item_${Date.now()}_${fileName}`;
     const cachedPath = join(this.cacheDir, cacheFileName);
     
     // Copy file to cache
-    copyFileSync(validatedPath, cachedPath);
+    copyFileSync(resolvedPath, cachedPath);
     
     const preview = this.generatePreview('', contentType, fileName, fileSize);
     
@@ -211,12 +255,12 @@ export class ClipboardDatabase {
     `);
     
     const result = stmt.run(
-      validatedPath, // Store validated path as content
+      validatedPath, // Store original path as content for user reference
       contentType,
       preview,
       isPrivate ? 1 : 0,
       cachedPath,
-      validatedPath,
+      validatedPath, // Store original path as original_path
       fileSize,
       mimeType
     );

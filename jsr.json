@@ -1,0 +1,23 @@
+{
+  "name": "@tyr/mcp-clipboard",
+  "version": "1.0.2",
+  "license": "MIT",
+  "exports": "./src/server.ts",
+  "publish": {
+    "include": [
+      "src/",
+      "README.md", 
+      "LICENSE",
+      "DOCKER.md"
+    ],
+    "exclude": [
+      "node_modules/",
+      "dist/",
+      "*.log",
+      ".env*",
+      "docker-compose*.yml",
+      "Dockerfile*",
+      "*.test.ts"
+    ]
+  }
+}

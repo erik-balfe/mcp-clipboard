@@ -1,7 +1,7 @@
 {
   "name": "mcp-clipboard",
-  "version": "1.0.0",
-  "description": "MCP server for clipboard management with persistent storage, search, and advanced features",
+  "version": "1.0.2",
+  "description": "MCP server for clipboard management with persistent storage, search, and multimodal support",
   "main": "dist/server.js",
   "module": "index.ts",
   "type": "module",
@@ -9,21 +9,45 @@
   "bin": {
     "mcp-clipboard": "./dist/server.js"
   },
+  "files": [
+    "dist/server.js",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "build": "bun build src/server.ts --outdir dist --target node --format esm",
+    "build": "bun build src/server.ts --outdir dist --target bun --format esm",
     "start": "bun run src/server.ts",
     "dev": "bun --watch src/server.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "prepare": "bun build src/server.ts --outfile dist/server.js --target bun --format esm && (echo '#!/usr/bin/env bun'; cat dist/server.js) > /tmp/server && mv /tmp/server dist/server.js && chmod +x dist/server.js",
+    "prepublishOnly": "npm run prepare",
+    "jsr-check": "bunx jsr publish --dry-run --allow-dirty"
   },
   "keywords": [
     "mcp",
     "clipboard",
     "model-context-protocol",
     "ai-tools",
-    "clipboard-manager"
+    "clipboard-manager",
+    "claude",
+    "ai-agent",
+    "persistent-storage",
+    "search",
+    "multimodal"
   ],
-  "author": "Claude Code",
+  "author": "Erik Balfe <erik.balfe@protonmail.com>",
   "license": "MIT",
+  "homepage": "https://github.com/erik-balfe/mcp-clipboard",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/erik-balfe/mcp-clipboard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/erik-balfe/mcp-clipboard/issues"
+  },
+  "engines": {
+    "bun": ">=1.2.18"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
@@ -31,6 +55,7 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.15.0"
+    "@modelcontextprotocol/sdk": "^1.15.0",
+    "sql.js": "^1.13.0"
   }
 }

@@ -1,0 +1,51 @@
+# Production Dockerfile using JSR package
+# This implements the two-step CI/CD strategy:
+# 1. Package is built and published to JSR
+# 2. Docker image pulls the published package
+
+FROM oven/bun:1.2.18-slim AS base
+WORKDIR /app
+
+# Install the published package from JSR
+FROM base AS deps
+# Install the JSR package
+RUN echo '{"name":"mcp-clipboard-docker","dependencies":{"@tyr/mcp-clipboard":"latest"}}' > package.json
+RUN bun install --frozen-lockfile
+
+# Runtime stage
+FROM oven/bun:1.2.18-slim AS runtime
+WORKDIR /app
+
+# Create non-root user for security
+RUN addgroup --system --gid 1001 bun \
+    && adduser --system --uid 1001 --ingroup bun bun
+
+# Copy installed package
+COPY --from=deps --chown=bun:bun /app/node_modules ./node_modules
+
+# Create directories and set permissions
+RUN mkdir -p /app/data /app/cache && \
+    chown -R bun:bun /app/data /app/cache
+
+# Switch to non-root user
+USER bun
+
+# Set environment variables
+ENV NODE_ENV=production
+ENV MCP_CLIPBOARD_DATA_DIR=/app/data
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD bun --version || exit 1
+
+# Run the MCP server from the installed JSR package
+CMD ["bun", "run", "node_modules/@tyr/mcp-clipboard/dist/server.js"]
+
+# Labels
+LABEL maintainer="Erik Balfe <erik.balfe@protonmail.com>"
+LABEL description="MCP Clipboard Server - Using JSR Package"
+LABEL version="1.0.2"
+LABEL org.opencontainers.image.title="MCP Clipboard Server (JSR)"
+LABEL org.opencontainers.image.description="Clipboard management server using published JSR package with Bun runtime"
+LABEL org.opencontainers.image.url="https://github.com/erik-balfe/mcp-clipboard"
+LABEL org.opencontainers.image.source="https://github.com/erik-balfe/mcp-clipboard"

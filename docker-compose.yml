@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  mcp-clipboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: mcp-clipboard:latest
+    container_name: mcp-clipboard-server
+    restart: unless-stopped
+    
+    # Environment variables
+    environment:
+      - NODE_ENV=production
+      - MCP_CLIPBOARD_DATA_DIR=/app/data
+    
+    # Volume for persistent data storage
+    volumes:
+      - clipboard_data:/app/data
+      # Map host home directory for file access (read-only for security)
+      - ${HOME}:/host/home:ro
+      # Map current directory for file operations
+      - ${PWD}:/host/pwd:rw
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    read_only: false  # Set to false because we need to write to SQLite database
+    
+    # User mapping
+    user: "1001:1001"  # Run as non-root user
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "bun", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Logging configuration
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Network configuration
+    networks:
+      - mcp-network
+
+  # Optional: Add a lightweight monitoring container
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: mcp-clipboard-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=3600  # Check for updates every hour
+      - WATCHTOWER_INCLUDE_RESTARTING=true
+    networks:
+      - mcp-network
+    profiles:
+      - monitoring  # Only run when explicitly enabled: docker-compose --profile monitoring up
+
+volumes:
+  clipboard_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data
+
+networks:
+  mcp-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: mcp-clipboard-br
