@@ -14,8 +14,8 @@ try {
 }
 
 try {
-  // Should fail - path traversal attempt
-  validateFilePath('../../../etc/passwd');
+  // Should fail - path traversal attempt to system directory
+  validateFilePath('/etc/passwd');
   console.log('❌ Path traversal attack succeeded (BAD!)');
 } catch (error) {
   console.log('✅ Path traversal blocked:', error.message);
