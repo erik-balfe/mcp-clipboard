@@ -54,64 +54,21 @@ jobs:
           echo "VERSION=latest" >> $GITHUB_ENV
           echo "Building Docker image for version: latest"
       
-      - name: Wait for JSR package availability
-        run: |
-          echo "Waiting for JSR package to be available..."
-          for i in {1..10}; do
-            if bunx jsr show @tyr/mcp-clipboard > /dev/null 2>&1; then
-              echo "JSR package is available"
-              break
-            fi
-            echo "Attempt $i: JSR package not yet available, waiting 30 seconds..."
-            sleep 30
-          done
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.2.18'
       
-      - name: Create JSR-based package.json for Docker
-        run: |
-          cat > docker-package.json << 'EOF'
-          {
-            "name": "mcp-clipboard-docker",
-            "version": "1.0.0",
-            "dependencies": {
-              "@tyr/mcp-clipboard": "${{ env.VERSION == 'latest' && 'latest' || env.VERSION }}"
-            }
-          }
-          EOF
-          echo "Created Docker package.json:"
-          cat docker-package.json
+      - name: Install dependencies
+        run: bun install
       
-      - name: Create optimized Dockerfile for JSR
+      - name: Update version in Dockerfile
         run: |
-          cat > Dockerfile.production << 'EOF'
-          FROM oven/bun:1.2.18-slim AS base
-          WORKDIR /app
-          
-          # Install JSR package
-          COPY docker-package.json package.json
-          RUN bun install --production
-          
-          # Create non-root user
-          RUN addgroup --system --gid 1001 bun && \
-              adduser --system --uid 1001 --ingroup bun bun
-          
-          # Set up directories
-          RUN mkdir -p /app/data /host/home /host/pwd && \
-              chown -R bun:bun /app/data
-          
-          # Switch to non-root user
-          USER bun
-          
-          # Environment
-          ENV NODE_ENV=production
-          ENV MCP_CLIPBOARD_DATA_DIR=/app/data
-          
-          # Health check
-          HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-              CMD bun --version || exit 1
-          
-          # Run from JSR package
-          CMD ["bun", "run", "node_modules/@tyr/mcp-clipboard/src/server.ts"]
-          EOF
+          VERSION_TO_USE="${{ env.VERSION }}"
+          if [ -z "$VERSION_TO_USE" ]; then
+            VERSION_TO_USE="latest"
+          fi
+          sed -i "s/LABEL version=\"[^\"]*\"/LABEL version=\"$VERSION_TO_USE\"/" Dockerfile
       
       - name: Extract metadata
         id: meta
@@ -131,7 +88,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.production
+          file: ./Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -165,7 +122,7 @@ jobs:
             "mcpServers": {
               "clipboard": {
                 "command": "docker",
-                "args": ["exec", "-i", "mcp-clipboard", "bun", "run", "node_modules/@tyr/mcp-clipboard/src/server.ts"]
+                "args": ["exec", "-i", "mcp-clipboard", "bun", "run", "src/server.ts"]
               }
             }
           }
