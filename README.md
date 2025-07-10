@@ -1,323 +1,187 @@
 # MCP Clipboard Manager
 
-> **Persistent clipboard for AI agents** - Never lose context again! 🚀
+> **Give your AI agent a memory** - Never lose context again! 🚀
 
-A Model Context Protocol (MCP) server that gives AI agents like Claude a powerful clipboard with persistent storage, search, and multimodal support. Think of it as a sophisticated clipboard manager designed specifically for AI workflows.
+The easiest way to add persistent clipboard functionality to Claude Desktop, VS Code, or any MCP-compatible AI agent.
 
-## ✨ Why You Need This
+## 🎯 What This Does
 
-**The Problem**: AI agents have no working memory. They can't remember that error message you copied 5 minutes ago, or keep track of useful code snippets across conversations.
+**Problem**: AI agents forget everything between conversations. That useful code snippet or error message? Gone.
 
-**The Solution**: MCP Clipboard Manager provides AI agents with persistent, searchable clipboard history that survives across sessions - just like desktop clipboard managers, but designed for AI workflows.
+**Solution**: This gives your AI a persistent, searchable clipboard that remembers everything across sessions.
 
-## 🎯 Perfect For
+## ⚡ One-Click Installation
 
-- **Developers**: Store error messages, code snippets, and commands across AI conversations
-- **Researchers**: Keep references, quotes, and data snippets organized
-- **Content Creators**: Manage drafts, ideas, and revisions with AI assistance
-- **Anyone**: Who wants their AI to remember context between conversations
+### **Option 1: Docker (Recommended - No Setup Required)**
 
-## 🚀 Quick Start
+Just add this to your MCP client config and restart:
 
-### 1. Install Bun Runtime
-```bash
-curl -fsSL https://bun.sh/install | bash
-```
-
-### 2. Download and Configure
-
-#### Step 1: Download the Server
-```bash
-# Create a directory for MCP servers
-mkdir -p ~/.mcp-servers
-
-# Download the clipboard server
-curl -L https://github.com/erik-balfe/mcp-clipboard/releases/latest/download/server.js -o ~/.mcp-servers/mcp-clipboard-server.js
-
-# Make it executable
-chmod +x ~/.mcp-servers/mcp-clipboard-server.js
-```
-
-#### Step 2: Configure Your MCP Client
-
-**Claude Desktop** (`claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
     "clipboard": {
-      "command": "bun",
-      "args": ["run", "~/.mcp-servers/mcp-clipboard-server.js"]
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "-v", "${HOME}:/host/home",
+        "-v", "${PWD}:/host/pwd",
+        "-e", "DOCKER_CONTAINER=true",
+        "ghcr.io/erik-balfe/mcp-clipboard:latest"
+      ]
     }
   }
 }
 ```
 
-**Claude Code** (`claude_code_config.json`):
+### **Option 2: Direct Install (Requires Bun)**
+
+1. **Install Bun**: `curl -fsSL https://bun.sh/install | bash`
+2. **Add to config**:
 ```json
 {
   "mcpServers": {
     "clipboard": {
-      "command": "bun",
-      "args": ["run", "~/.mcp-servers/mcp-clipboard-server.js"]
+      "command": "npx",
+      "args": ["@tyr/mcp-clipboard@latest"]
     }
   }
 }
 ```
 
-#### Alternative: Use Absolute Path
-If the `~` path doesn't work, use the full path:
-```json
-{
-  "mcpServers": {
-    "clipboard": {
-      "command": "bun",
-      "args": ["run", "/Users/yourusername/.mcp-servers/mcp-clipboard-server.js"]
-    }
-  }
-}
+## 📁 Where to Put the Config
+
+| Client | Location |
+|--------|----------|
+| **Claude Desktop** (macOS) | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| **Claude Desktop** (Windows) | `%AppData%\Claude\claude_desktop_config.json` |
+| **Claude Desktop** (Linux) | `~/.config/claude/claude_desktop_config.json` |
+| **VS Code/Cursor** | MCP extension settings |
+
+## ✅ That's It!
+
+Restart your AI client and you're done. Your AI can now:
+
+- **Remember** code snippets, error messages, and notes
+- **Search** through everything it's saved
+- **View** images and files you've copied
+- **Pin** important items to keep forever
+
+## 🎪 What Your AI Can Do Now
+
+| What AI Sees | What It Can Do |
+|--------------|----------------|
+| `clipboard_copy` | Save any text or content |
+| `clipboard_copy_file` | Save images, documents, files |
+| `clipboard_paste` | Get the latest copied item |
+| `clipboard_search` | Find anything in the history |
+| `clipboard_list` | Show clipboard history |
+| `clipboard_pin` | Keep important items |
+| `clipboard_look_at` | View saved images/files |
+
+## 💬 Example Usage
+
+```
+You: "Save this error for debugging later"
+AI: I'll save that error message to the clipboard.
+
+[Later conversation]
+You: "What was that database error from earlier?"
+AI: Let me search the clipboard... Found it! Here's the error:
 ```
 
-### 3. Configuration File Locations
+## 🔒 Privacy & Security
 
-| Client | Platform | Location |
-|--------|----------|----------|
-| **Claude Desktop** | macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
-| **Claude Desktop** | Windows | `%AppData%\Claude\claude_desktop_config.json` |
-| **Claude Desktop** | Linux | `~/.config/claude/claude_desktop_config.json` |
-| **Claude Code** | All | Project-specific config file |
-| **VS Code** | All | VS Code settings |
-| **Cursor** | All | Cursor settings |
-
-### 4. Restart Your Client
-
-After updating the configuration, restart your MCP client (Claude Desktop, VS Code, etc.) to load the clipboard server.
-
-### 5. Start Using!
-
-Your AI agent now has access to powerful clipboard tools:
-
-```
-You: "Remember this API key for later: sk-1234..."
-AI: [Uses clipboard_copy with private mode]
-
-You: "What was that error from earlier?"
-AI: [Uses clipboard_search to find it]
-
-You: "Show me my clipboard history"
-AI: [Uses clipboard_list to display everything]
-```
-
-## 🔧 Available Tools
-
-Your AI agent can now use these clipboard tools:
-
-| Tool | Purpose | Example |
-|------|---------|---------|
-| `clipboard_copy` | Store text content | Save error messages, code snippets |
-| `clipboard_copy_file` | Store files (images, docs) | Cache screenshots, documents |
-| `clipboard_paste` | Retrieve content | Get the latest copied item |
-| `clipboard_list` | Browse history | See all clipboard items |
-| `clipboard_search` | Find content | Search for specific text |
-| `clipboard_pin` | Keep items permanently | Pin important references |
-| `clipboard_delete` | Remove items | Clean up unwanted content |
-| `clipboard_clear` | Clear history | Fresh start |
-| `clipboard_look_at` | View files | AI can "see" cached images |
-
-## 💡 Features
-
-### 🎪 **Multimodal Support**
-- **Text**: Code snippets, error messages, notes
-- **Images**: Screenshots, diagrams, photos (AI can view them!)
-- **Documents**: PDFs, Word docs, presentations
-- **Videos**: Screen recordings, tutorials
-
-### 🔍 **Smart Organization**
-- **Search**: Full-text search across all content
-- **Pin**: Keep important items permanently
-- **Private Mode**: Auto-clearing for sensitive data
-- **Smart Previews**: See content at a glance
-
-### 🔒 **Privacy & Security**
-- **Local Storage**: Everything stays on your machine
-- **No Network**: Completely offline operation
-- **Secure**: Path validation, input sanitization
+- **100% Local**: Everything stays on your machine
+- **No Network**: Completely offline operation  
+- **Secure**: Built-in path validation and rate limiting
 - **Private Mode**: Sensitive content auto-expires
 
-### ⚡ **Performance**
-- **Fast**: SQLite database with smart indexing
-- **Efficient**: 50 item limit with 100MB per file
-- **Persistent**: Survives reboots and session changes
+## 💡 Common Use Cases
 
-## 📖 Common Use Cases
+### 💻 For Developers
+- Save error messages and ask AI to debug them later
+- Keep useful code snippets across conversations  
+- Pin frequently used commands and references
+- Build a searchable knowledge base with AI help
 
-### For Developers
-```
-1. Copy error message → Ask AI to debug
-2. AI provides solution → Copy code snippet
-3. Later conversation → Search for that solution
-4. Pin frequently used commands
-```
+### 📚 For Research
+- Save quotes and references while reading
+- Ask AI to synthesize information from multiple clips
+- Keep track of important sources and data
+- Build connections between different research threads
 
-### For Research
-```
-1. Copy interesting quote → Continue reading
-2. Find related article → Copy key points
-3. Ask AI to synthesize → Reference all clips
-4. Pin important sources
-```
+### ✍️ For Content Creation  
+- Save draft versions and get AI feedback
+- Compare different revisions of your work
+- Keep inspiration and ideas organized
+- Let AI help you refine and improve content
 
-### For Content Creation
-```
-1. Copy draft paragraph → Get AI feedback
-2. Copy revised version → Compare with original
-3. Copy final version → Pin for later use
-4. Search through all versions
-```
+## 🔧 Settings
 
-## 🛠️ Requirements
+- **Storage**: Everything saved to `~/.mcp-clipboard/` on your machine
+- **Limits**: 50 items max (pinned items don't count)  
+- **File Size**: Up to 100MB per file
+- **Search**: Full-text search across all content
 
-- **Bun Runtime**: Install from [bun.sh](https://bun.sh)
-- **MCP Client**: Claude Desktop, or any MCP-compatible client
-- **Storage**: ~100MB for cache folder
+## 🚨 Need Help?
 
-## 🔧 Configuration
+### Quick Fixes
 
-The clipboard stores data in `~/.mcp-clipboard/`:
-- `clipboard.db` - SQLite database
-- `cache/` - Cached files (images, documents)
+**Docker not working?**
+- Make sure Docker is installed and running
+- Try the direct install option instead
 
-Default limits (configurable):
-- **Max Items**: 50 (excluding pinned)
-- **Max File Size**: 100MB
-- **Storage Location**: `~/.mcp-clipboard/`
+**AI can't see clipboard tools?**  
+- Restart your AI client after adding the config
+- Check that the config file is valid JSON
 
-## 🚨 Troubleshooting
+**Permission errors?**
+- Make sure the config file location is writable
+- Try using absolute paths instead of `~`
 
-### Common Issues
+### Still Having Issues?
 
-**"Command not found: bun"**
-- Install Bun: `curl -fsSL https://bun.sh/install | bash`
-- Restart your terminal after installation
-- Check `bun --version` works
-
-**"Failed to fetch server.js"**
-- Check internet connection
-- Try downloading manually: `curl -L https://github.com/erik-balfe/mcp-clipboard/releases/latest/download/server.js -o server.js`
-- Use absolute file path in configuration
-
-**"MCP server failed to start"**
-- Check configuration file syntax (valid JSON)
-- Verify file paths are absolute, not relative
-- Test server manually: `bun run server.js`
-
-**"Database error"**
-- Ensure `~/.mcp-clipboard/` directory is writable
-- Try clearing the cache: `rm -rf ~/.mcp-clipboard/`
-
-**"No clipboard tools available"**
-- Restart your MCP client after configuration changes
-- Check client logs for connection errors
-- Verify the server starts without errors
-
-### Testing Installation
-
-```bash
-# Test if Bun can run the server
-bun run ~/.mcp-servers/mcp-clipboard-server.js
-
-# Should show: "MCP Clipboard Server running on stdio"
-# Press Ctrl+C to stop the test
-```
-
-### Get Help
-
-- 📚 See `docs/` folder for detailed documentation
-- 🐛 Report issues on GitHub
-- 💬 Join discussions in GitHub Issues
-
-## 🎉 What's Next?
-
-This tool transforms how AI agents work with temporary data. Instead of losing context, your AI can:
-
-- Remember error messages across conversations
-- Build up a library of useful code snippets
-- Keep track of research findings
-- Maintain context in complex workflows
-
-**Ready to give your AI agent a memory upgrade?** Install MCP Clipboard Manager today!
+1. **Check the logs** in your AI client for error messages
+2. **Test manually**: `docker run ghcr.io/erik-balfe/mcp-clipboard:latest` 
+3. **File a bug report** on [GitHub Issues](https://github.com/erik-balfe/mcp-clipboard/issues)
 
 ---
 
-## 📜 License
+## 🎉 That's It!
 
-MIT License - Use it however you want!
+Your AI agent now has a persistent memory. It can remember conversations, build knowledge over time, and help you way more effectively.
 
-## 🙏 Contributing
+**Questions?** [Open an issue](https://github.com/erik-balfe/mcp-clipboard/issues) and we'll help you get set up.
 
-Contributions welcome! See `CONTRIBUTING.md` for details.
+---
 
-## 🚀 Next Steps
-
-### First Release
-
-To create your first release:
-
-1. **Push to GitHub**: Initialize your repository and push the code
-2. **Create a release**: Use GitHub's release interface or the Actions workflow
-3. **Test the installation**: Download and test the release package
-
-### Development Workflow
-
-```bash
-# Development
-bun run dev      # Development with hot reload
-bun run start    # Run from source
-bun run build    # Build for production
-
-# Testing
-bun run src/security.test.ts  # Run security tests
-npx @modelcontextprotocol/inspector dist/server.js  # Test with MCP Inspector
-```
-
-### Creating Releases
-
-The project includes automated CI/CD:
-
-- **Dev builds**: Automatic on every push to master
-- **Production releases**: Manual trigger or GitHub releases
-- **Semantic versioning**: Automatically validated
-
-## 🔧 Technical Details
+<details>
+<summary>🔧 Technical Details (for developers)</summary>
 
 ### Architecture
-- **Runtime**: Bun for performance
-- **Database**: SQLite with FTS5 search
-- **Protocol**: Model Context Protocol (MCP)
-- **Security**: Path validation, input sanitization, rate limiting
+- **Runtime**: Bun with SQLite database
+- **Protocol**: Model Context Protocol (MCP)  
+- **Security**: Path validation, rate limiting, input sanitization
 
-### Performance
-- **50 item limit** with automatic cleanup
-- **100MB file size** limit per item
-- **WAL mode** for better concurrent access
-- **Prepared statements** for SQL injection protection
+### Performance  
+- 50 item limit with automatic cleanup
+- 100MB max file size per item
+- Full-text search with FTS5
+- WAL mode for concurrent access
 
-### Security Features
-- Path traversal protection
-- FTS injection prevention
-- Rate limiting (100 ops/min, 10 files/min)
-- Input validation and sanitization
+### Development
+```bash
+git clone https://github.com/erik-balfe/mcp-clipboard.git
+cd mcp-clipboard
+bun install
+bun run dev
+```
 
-## 🆘 Support
+### Contributing
+See `CONTRIBUTING.md` for development setup and guidelines.
 
-- **Documentation**: See `docs/` folder
-- **Issues**: Report bugs on GitHub
-- **Contributing**: See `CONTRIBUTING.md`
-- **Security**: Email security issues privately
+</details>
 
-## 📈 Project Status
+## 📜 License
 
-- ✅ Core functionality complete
-- ✅ Security vulnerabilities fixed
-- ✅ CI/CD pipeline ready
-- ✅ Documentation complete
-- 🚀 **Ready for production use**
+MIT License - Free to use however you want!
