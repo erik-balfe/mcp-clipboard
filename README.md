@@ -23,8 +23,7 @@ Just add this to your MCP client config and restart:
       "command": "docker",
       "args": [
         "run", "--rm", "-i",
-        "-v", "${HOME}:/host/home",
-        "-v", "${PWD}:/host/pwd",
+        "-v", "mcp-clipboard-data:/app/data",
         "-e", "DOCKER_CONTAINER=true",
         "ghcr.io/erik-balfe/mcp-clipboard:latest"
       ]
@@ -118,10 +117,11 @@ AI: Let me search the clipboard... Found it! Here's the error:
 
 ## 🔧 Settings
 
-- **Storage**: Everything saved to `~/.mcp-clipboard/` on your machine
+- **Storage**: Everything saved in Docker volume `mcp-clipboard-data` (persistent)
 - **Limits**: 50 items max (pinned items don't count)  
 - **File Size**: Up to 100MB per file
 - **Search**: Full-text search across all content
+- **Persistence**: Data survives container restarts
 
 ## 🚨 Need Help?
 
@@ -137,7 +137,8 @@ AI: Let me search the clipboard... Found it! Here's the error:
 
 **Permission errors?**
 - Make sure the config file location is writable
-- Try using absolute paths instead of `~`
+- Use absolute paths (like `/Users/username`) instead of `~` or `${HOME}`
+- Ensure the mounted directories exist and are readable
 
 ### Still Having Issues?
 
