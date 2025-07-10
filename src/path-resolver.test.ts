@@ -149,9 +149,9 @@ describe('DockerPathResolver', () => {
     });
 
     it('maps home directory paths correctly', () => {
-      // The test resolver uses custom paths, so let's use the actual structure
-      const testResolver = new DockerPathResolver('/host/home', '/host/pwd');
-      const homeDir = '/var/home/erik'; // Actual home directory
+      // Use dynamic home directory
+      const homeDir = homedir();
+      const testResolver = new DockerPathResolver('/host/home', '/host/pwd', homeDir, process.cwd());
       const relativePath = 'documents/test.txt';
       const homePath = join(homeDir, relativePath);
       const expectedContainerPath = join('/host/home', relativePath);
@@ -165,8 +165,9 @@ describe('DockerPathResolver', () => {
     });
 
     it('maps working directory paths correctly', () => {
-      const testResolver = new DockerPathResolver('/host/home', '/host/pwd');
-      const currentDir = '/var/home/erik/devProjects/mcp-clipboard'; // Actual working directory
+      const currentDir = process.cwd();
+      const homeDir = homedir();
+      const testResolver = new DockerPathResolver('/host/home', '/host/pwd', homeDir, currentDir);
       const relativePath = 'test.txt';
       const workingPath = join(currentDir, relativePath);
       const expectedContainerPath = join('/host/pwd', relativePath);
@@ -191,7 +192,7 @@ describe('DockerPathResolver', () => {
     });
 
     it('throws error when mapped file does not exist in container', () => {
-      const homeDir = '/var/home/erik';
+      const homeDir = homedir();
       const homePath = join(homeDir, 'nonexistent.txt');
       
       const mockExistsSync = spyOn(fs, 'existsSync').mockReturnValue(false);
@@ -204,9 +205,9 @@ describe('DockerPathResolver', () => {
     });
 
     it('prefers home directory mapping over working directory', () => {
-      const testResolver = new DockerPathResolver('/host/home', '/host/pwd');
-      // Create a path that could match both home and working directory
-      const homeDir = '/var/home/erik'; // Actual home directory
+      const homeDir = homedir();
+      const currentDir = process.cwd();
+      const testResolver = new DockerPathResolver('/host/home', '/host/pwd', homeDir, currentDir);
       const relativePath = 'test.txt';
       const overlapPath = join(homeDir, relativePath);
       const homeContainerPath = join('/host/home', relativePath);
