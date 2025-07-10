@@ -1,15 +1,9 @@
-// Configuration constants for MCP Clipboard Manager
-
-// Storage limits
-export const MAX_ITEMS = 50; // Maximum number of non-pinned items
-export const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB max file size
-export const PREVIEW_LENGTH = 100; // Characters to show in preview
-
-// File type classifications
+export const MAX_ITEMS = 50;
+export const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+export const PREVIEW_LENGTH = 100;
 export const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'];
 export const VIDEO_EXTENSIONS = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mkv'];
 
-// MIME type mappings
 export const MIME_TYPES: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -31,11 +25,9 @@ export const MIME_TYPES: Record<string, string> = {
   '.ts': 'application/typescript'
 };
 
-// Security constraints
-export const ALLOWED_PATH_REGEX = /^[^<>:"|?*]+$/; // Basic path validation
-export const FTS_SPECIAL_CHARS = /[*"()-]/g; // FTS5 special characters to escape
+export const ALLOWED_PATH_REGEX = /^[^<>:"|?*]+$/;
+export const FTS_SPECIAL_CHARS = /[*"()-]/g;
 
-// Rate limiting
-export const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
-export const RATE_LIMIT_MAX_REQUESTS = 100; // Max requests per window
-export const RATE_LIMIT_MAX_FILE_OPS = 10; // Max file operations per window
+export const RATE_LIMIT_WINDOW = 60 * 1000;
+export const RATE_LIMIT_MAX_REQUESTS = 100;
+export const RATE_LIMIT_MAX_FILE_OPS = 10;

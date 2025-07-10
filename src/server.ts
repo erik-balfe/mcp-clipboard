@@ -82,11 +82,9 @@ class ClipboardServer {
     
     this.setupToolHandlers();
     
-    // Handle cleanup on process exit
     process.on('SIGINT', () => this.cleanup());
     process.on('SIGTERM', () => this.cleanup());
     
-    // Clean up rate limiter periodically
     setInterval(() => this.rateLimiter.cleanup(), RATE_LIMIT_WINDOW);
   }
 
@@ -262,7 +260,6 @@ class ClipboardServer {
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
 
-      // Rate limiting - use a simple identifier (could be session-based in real implementation)
       const clientId = 'default'; // In real implementation, extract from request context
       const isFileOperation = name === 'clipboard_copy_file';
       
@@ -343,7 +340,6 @@ class ClipboardServer {
         throw new McpError(ErrorCode.InvalidParams, `Clipboard item with ID ${id} not found`);
       }
     } else {
-      // Get the most recent item (regardless of pin status)
       item = this.db.getLatestItem();
       if (!item) {
         throw new McpError(ErrorCode.InvalidParams, 'Clipboard is empty');
@@ -558,7 +554,6 @@ class ClipboardServer {
       throw new McpError(ErrorCode.InvalidParams, `Clipboard item with ID ${id} not found`);
     }
     
-    // Check if this is a file item
     if (!item.cached_file_path) {
       return {
         content: [
@@ -575,7 +570,6 @@ class ClipboardServer {
       throw new McpError(ErrorCode.InvalidParams, `Cached file not found for item ${id}`);
     }
     
-    // For images, return them for AI viewing
     if (item.content_type === 'image_file' && item.mime_type?.startsWith('image/')) {
       return {
         content: [
@@ -595,7 +589,6 @@ class ClipboardServer {
       };
     }
     
-    // For other files, show metadata and path
     return {
       content: [
         {

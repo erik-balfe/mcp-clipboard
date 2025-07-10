@@ -14,6 +14,7 @@ services:
     environment:
       - NODE_ENV=production
       - MCP_CLIPBOARD_DATA_DIR=/app/data
+      - DOCKER_CONTAINER=true
     
     # Volume for persistent data storage
     volumes:

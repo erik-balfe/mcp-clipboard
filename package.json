@@ -55,7 +55,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.15.0",
-    "sql.js": "^1.13.0"
+    "@modelcontextprotocol/sdk": "^1.15.0"
   }
 }

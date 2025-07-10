@@ -1,8 +1,6 @@
-// Use Bun's native SQLite for optimal performance
 import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, copyFileSync, unlinkSync, statSync } from 'fs';
-import { join, extname, basename, resolve, isAbsolute } from 'path';
-import { homedir } from 'os';
+import { join, extname, basename } from 'path';
 import { 
   MAX_ITEMS, 
   MAX_FILE_SIZE, 
@@ -12,6 +10,7 @@ import {
   MIME_TYPES
 } from './constants.js';
 import { validateFilePath, sanitizeFtsQuery } from './security.js';
+import { PathResolverFactory, type PathResolver } from './path-resolver.js';
 
 export interface ClipboardItem {
   id: number;
@@ -31,82 +30,68 @@ export interface ClipboardItem {
 
 export interface ClipboardItemInsert extends Omit<ClipboardItem, 'id' | 'created_at' | 'updated_at'> {}
 
+/**
+ * ClipboardDatabase handles persistent storage of clipboard items.
+ * 
+ * Responsibilities:
+ * - Database operations (CRUD)
+ * - SQLite database management
+ * - Cache file management
+ * 
+ * Note: Path resolution is handled by injected PathResolver service
+ */
 export class ClipboardDatabase {
   private db: Database;
   private dbPath: string;
   private dataDir: string;
   private cacheDir: string;
-  private isDockerEnvironment: boolean;
+  private pathResolver: PathResolver;
 
-  constructor() {
-    // Store database in data directory (supports Docker volumes)
-    const dataBaseDir = process.env.MCP_CLIPBOARD_DATA_DIR || join(homedir(), '.mcp-clipboard');
-    this.dataDir = dataBaseDir;
+  constructor(pathResolver?: PathResolver) {
+    this.pathResolver = pathResolver || PathResolverFactory.create();
+    this.dataDir = this.pathResolver.getDataDirectory();
     this.cacheDir = join(this.dataDir, 'cache');
     
-    // Detect if running in Docker environment
-    this.isDockerEnvironment = existsSync('/host/home') && existsSync('/host/pwd');
-    
-    if (!existsSync(this.dataDir)) {
-      mkdirSync(this.dataDir, { recursive: true });
-    }
-    if (!existsSync(this.cacheDir)) {
-      mkdirSync(this.cacheDir, { recursive: true });
-    }
+    this.initializeDirectories();
     
     this.dbPath = join(this.dataDir, 'clipboard.db');
     this.db = new Database(this.dbPath);
     this.initializeDatabase();
   }
 
-  // Resolve file path for Docker/native environment compatibility
-  private resolveFilePath(hostPath: string): string {
-    if (!this.isDockerEnvironment) {
-      return resolve(hostPath);
-    }
-
-    // In Docker, map host paths to container volume mounts
-    const resolvedPath = resolve(hostPath);
-    const userHome = homedir();
-    
-    // Map paths under user's home directory
-    if (resolvedPath.startsWith(userHome)) {
-      const relativePath = resolvedPath.substring(userHome.length);
-      return join('/host/home', relativePath);
+  /**
+   * Ensures required directories exist
+   */
+  private initializeDirectories(): void {
+    if (!existsSync(this.dataDir)) {
+      mkdirSync(this.dataDir, { recursive: true });
     }
     
-    // Map paths under current working directory (if different from home)
-    const cwd = process.cwd();
-    if (resolvedPath.startsWith(cwd)) {
-      const relativePath = resolvedPath.substring(cwd.length);
-      return join('/host/pwd', relativePath);
+    if (!existsSync(this.cacheDir)) {
+      mkdirSync(this.cacheDir, { recursive: true });
     }
-    
-    // For other absolute paths, try to map to /host/home first
-    if (isAbsolute(resolvedPath)) {
-      const mappedPath = join('/host/home', resolvedPath.substring(1));
-      if (existsSync(mappedPath)) {
-        return mappedPath;
-      }
-    }
-    
-    // Fallback: return original path (may not work in Docker)
-    return resolvedPath;
   }
 
+  /**
+   * Initializes the SQLite database with proper configuration
+   */
   private initializeDatabase(): void {
     // Enable WAL mode for better concurrent access
     this.db.exec('PRAGMA journal_mode = WAL');
-    
-    // Create clipboard_items table
+    this.db.exec('PRAGMA synchronous = NORMAL');
+    this.db.exec('PRAGMA cache_size = 1000');
+    this.db.exec('PRAGMA foreign_keys = ON');
+    this.db.exec('PRAGMA temp_store = MEMORY');
+
+    // Create table with all necessary fields
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS clipboard_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         content TEXT NOT NULL,
-        content_type TEXT NOT NULL CHECK (content_type IN ('text', 'html', 'image', 'file', 'image_file', 'document_file', 'video_file')),
+        content_type TEXT NOT NULL DEFAULT 'text',
         preview TEXT NOT NULL,
-        is_pinned BOOLEAN DEFAULT 0,
-        is_private BOOLEAN DEFAULT 0,
+        is_pinned INTEGER DEFAULT 0,
+        is_private INTEGER DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         cached_file_path TEXT,
@@ -116,77 +101,41 @@ export class ClipboardDatabase {
       )
     `);
 
-    // Create indexes for better performance
+    // Create FTS5 virtual table for full-text search
     this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_items(created_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_clipboard_pinned ON clipboard_items(is_pinned);
-      CREATE INDEX IF NOT EXISTS idx_clipboard_content_type ON clipboard_items(content_type);
-    `);
-
-    // Create FTS (Full Text Search) table for content search
-    this.db.exec(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts USING fts5(
-        content, preview,
-        content='clipboard_items',
-        content_rowid='id'
-      );
+      CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_search 
+      USING fts5(content, preview, content=clipboard_items, content_rowid=id)
     `);
 
     // Create triggers to keep FTS table in sync
     this.db.exec(`
-      CREATE TRIGGER IF NOT EXISTS clipboard_fts_insert AFTER INSERT ON clipboard_items BEGIN
-        INSERT INTO clipboard_fts(rowid, content, preview) VALUES (new.id, new.content, new.preview);
-      END;
-      
-      CREATE TRIGGER IF NOT EXISTS clipboard_fts_delete AFTER DELETE ON clipboard_items BEGIN
-        INSERT INTO clipboard_fts(clipboard_fts, rowid, content, preview) VALUES('delete', old.id, old.content, old.preview);
-      END;
-      
-      CREATE TRIGGER IF NOT EXISTS clipboard_fts_update AFTER UPDATE ON clipboard_items BEGIN
-        INSERT INTO clipboard_fts(clipboard_fts, rowid, content, preview) VALUES('delete', old.id, old.content, old.preview);
-        INSERT INTO clipboard_fts(rowid, content, preview) VALUES (new.id, new.content, new.preview);
-      END;
+      CREATE TRIGGER IF NOT EXISTS clipboard_search_insert AFTER INSERT ON clipboard_items BEGIN
+        INSERT INTO clipboard_search(rowid, content, preview) VALUES (new.id, new.content, new.preview);
+      END
     `);
+
+    this.db.exec(`
+      CREATE TRIGGER IF NOT EXISTS clipboard_search_delete AFTER DELETE ON clipboard_items BEGIN
+        INSERT INTO clipboard_search(clipboard_search, rowid, content, preview) VALUES('delete', old.id, old.content, old.preview);
+      END
+    `);
+
+    this.db.exec(`
+      CREATE TRIGGER IF NOT EXISTS clipboard_search_update AFTER UPDATE ON clipboard_items BEGIN
+        INSERT INTO clipboard_search(clipboard_search, rowid, content, preview) VALUES('delete', old.id, old.content, old.preview);
+        INSERT INTO clipboard_search(rowid, content, preview) VALUES (new.id, new.content, new.preview);
+      END
+    `);
+
+    // Clean up expired private items on startup
+    this.cleanupExpiredPrivateItems();
+    this.maintainItemLimit();
   }
 
-  // Generate preview text
-  private generatePreview(content: string, contentType: string, fileName?: string, fileSize?: number): string {
-    if (contentType === 'image') return '[Image]';
-    if (contentType === 'file') return '[File]';
-    if (contentType === 'image_file') return `[Image: ${fileName}${fileSize ? `, ${this.formatFileSize(fileSize)}` : ''}]`;
-    if (contentType === 'document_file') return `[Document: ${fileName}${fileSize ? `, ${this.formatFileSize(fileSize)}` : ''}]`;
-    if (contentType === 'video_file') return `[Video: ${fileName}${fileSize ? `, ${this.formatFileSize(fileSize)}` : ''}]`;
-    
-    // Clean up content and create preview
-    const cleaned = content.replace(/\s+/g, ' ').trim();
-    return cleaned.length > PREVIEW_LENGTH ? cleaned.substring(0, PREVIEW_LENGTH) + '...' : cleaned;
-  }
-
-  // Format file size for display
-  private formatFileSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes}B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}GB`;
-  }
-
-  // Determine content type from file extension
-  private getContentTypeFromFile(filePath: string): ClipboardItem['content_type'] {
-    const ext = extname(filePath).toLowerCase();
-    
-    if (IMAGE_EXTENSIONS.includes(ext)) return 'image_file';
-    if (VIDEO_EXTENSIONS.includes(ext)) return 'video_file';
-    return 'document_file';
-  }
-
-  // Get MIME type from extension
-  private getMimeType(filePath: string): string {
-    const ext = extname(filePath).toLowerCase();
-    return MIME_TYPES[ext] || 'application/octet-stream';
-  }
-
-  // Add new clipboard item
-  addItem(content: string, contentType: ClipboardItem['content_type'] = 'text', isPrivate: boolean = false): ClipboardItem {
+  /**
+   * Adds a text item to the clipboard
+   */
+  addTextItem(content: string, contentType: 'text' | 'html' = 'text', isPrivate: boolean = false): ClipboardItem {
     const preview = this.generatePreview(content, contentType);
     
     const stmt = this.db.prepare(`
@@ -195,21 +144,16 @@ export class ClipboardDatabase {
     `);
     
     const result = stmt.run(content, contentType, preview, isPrivate ? 1 : 0);
-    
-    // If private mode, clear previous private items
-    if (isPrivate) {
-      this.clearPrivateItems(result.lastInsertRowid as number);
-    }
-    
-    // Maintain max items (excluding pinned)
-    this.maintainMaxItems();
+    this.maintainItemLimit();
     
     return this.getItem(result.lastInsertRowid as number)!;
   }
 
-  // Add file to clipboard with caching
-  addFile(filePath: string, isPrivate: boolean = false): ClipboardItem {
-    // Validate and normalize the file path to prevent path traversal
+  /**
+   * Adds a file item to the clipboard with proper path resolution
+   */
+  addFileItem(filePath: string, isPrivate: boolean = false): ClipboardItem {
+    // Validate the input path first
     let validatedPath: string;
     try {
       validatedPath = validateFilePath(filePath);
@@ -217,10 +161,10 @@ export class ClipboardDatabase {
       throw new Error(`Invalid file path: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 
-    // Resolve file path for Docker/native compatibility
-    const resolvedPath = this.resolveFilePath(validatedPath);
+    // Resolve file path using path resolver
+    const resolvedPath = this.pathResolver.resolvePath(validatedPath);
 
-    // Validate file exists (using resolved path)
+    // Validate file exists at resolved path
     if (!existsSync(resolvedPath)) {
       throw new Error(`File not found: ${resolvedPath} (original: ${validatedPath})`);
     }
@@ -248,10 +192,8 @@ export class ClipboardDatabase {
     const preview = this.generatePreview('', contentType, fileName, fileSize);
     
     const stmt = this.db.prepare(`
-      INSERT INTO clipboard_items (
-        content, content_type, preview, is_private,
-        cached_file_path, original_path, file_size, mime_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO clipboard_items (content, content_type, preview, is_private, cached_file_path, original_path, file_size, mime_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     const result = stmt.run(
@@ -265,153 +207,163 @@ export class ClipboardDatabase {
       mimeType
     );
     
-    // If private mode, clear previous private items
-    if (isPrivate) {
-      this.clearPrivateItems(result.lastInsertRowid as number);
-    }
-    
-    // Maintain max items (excluding pinned)
-    this.maintainMaxItems();
+    this.maintainItemLimit();
     
     return this.getItem(result.lastInsertRowid as number)!;
   }
 
-  // Get item by ID
+  /**
+   * Retrieves a specific item by ID
+   */
   getItem(id: number): ClipboardItem | null {
     const stmt = this.db.prepare('SELECT * FROM clipboard_items WHERE id = ?');
     const row = stmt.get(id) as any;
-    return row ? this.mapRowToItem(row) : null;
+    
+    if (!row) {
+      return null;
+    }
+    
+    return this.mapRowToItem(row);
   }
 
-  // Get all items (pinned first, then by creation date desc)
-  getAllItems(limit: number = 30): ClipboardItem[] {
+  /**
+   * Lists clipboard items with pagination and filtering
+   */
+  listItems(limit: number = 10, includePrivate: boolean = false): ClipboardItem[] {
+    const whereClause = includePrivate ? '' : 'WHERE is_private = 0';
     const stmt = this.db.prepare(`
       SELECT * FROM clipboard_items 
+      ${whereClause}
       ORDER BY is_pinned DESC, created_at DESC 
       LIMIT ?
     `);
+    
     const rows = stmt.all(limit) as any[];
     return rows.map(row => this.mapRowToItem(row));
   }
 
-  // Get the most recent item regardless of pin status
-  getLatestItem(): ClipboardItem | null {
-    const stmt = this.db.prepare(`
-      SELECT * FROM clipboard_items 
-      ORDER BY created_at DESC 
-      LIMIT 1
-    `);
-    const row = stmt.get();
-    return row ? this.mapRowToItem(row) : null;
-  }
-
-  // Search items using FTS
-  searchItems(query: string, limit: number = 30): ClipboardItem[] {
-    // Sanitize the query to prevent FTS injection
+  /**
+   * Searches clipboard items using full-text search
+   */
+  searchItems(query: string, limit: number = 10): ClipboardItem[] {
     const sanitizedQuery = sanitizeFtsQuery(query);
     
     if (!sanitizedQuery) {
-      return []; // Return empty array for invalid queries
+      return [];
     }
-
+    
     const stmt = this.db.prepare(`
-      SELECT c.* FROM clipboard_items c
-      JOIN clipboard_fts fts ON c.id = fts.rowid
-      WHERE clipboard_fts MATCH ?
-      ORDER BY c.is_pinned DESC, c.created_at DESC
+      SELECT clipboard_items.* FROM clipboard_items
+      JOIN clipboard_search ON clipboard_items.id = clipboard_search.rowid
+      WHERE clipboard_search MATCH ? AND clipboard_items.is_private = 0
+      ORDER BY clipboard_items.is_pinned DESC, clipboard_items.created_at DESC
       LIMIT ?
     `);
+    
     const rows = stmt.all(sanitizedQuery, limit) as any[];
     return rows.map(row => this.mapRowToItem(row));
   }
 
-  // Pin/unpin item
-  togglePin(id: number): boolean {
-    const stmt = this.db.prepare('UPDATE clipboard_items SET is_pinned = NOT is_pinned WHERE id = ?');
-    const result = stmt.run(id);
+  /**
+   * Pins or unpins an item
+   */
+  pinItem(id: number, pinned: boolean = true): boolean {
+    const stmt = this.db.prepare('UPDATE clipboard_items SET is_pinned = ? WHERE id = ?');
+    const result = stmt.run(pinned ? 1 : 0, id);
     return result.changes > 0;
   }
 
-  // Delete specific item
+  /**
+   * Deletes a specific item
+   */
   deleteItem(id: number): boolean {
-    // First get the item to check for cached file
     const item = this.getItem(id);
-    
-    const stmt = this.db.prepare('DELETE FROM clipboard_items WHERE id = ?');
-    const result = stmt.run(id);
+    if (!item) {
+      return false;
+    }
     
     // Clean up cached file if it exists
-    if (item?.cached_file_path && existsSync(item.cached_file_path)) {
+    if (item.cached_file_path && existsSync(item.cached_file_path)) {
       try {
         unlinkSync(item.cached_file_path);
       } catch (error) {
-        // Ignore file deletion errors
+        console.warn(`Failed to delete cached file: ${item.cached_file_path}`);
       }
     }
     
+    const stmt = this.db.prepare('DELETE FROM clipboard_items WHERE id = ?');
+    const result = stmt.run(id);
     return result.changes > 0;
   }
 
-  // Clear all items (except pinned)
-  clearHistory(): number {
-    const stmt = this.db.prepare('DELETE FROM clipboard_items WHERE is_pinned = 0');
-    const result = stmt.run();
-    return result.changes;
-  }
-
-  // Clear all items including pinned
-  clearAll(): number {
-    const stmt = this.db.prepare('DELETE FROM clipboard_items');
-    const result = stmt.run();
-    return result.changes;
-  }
-
-  // Clear only private items (except the current one)
-  private clearPrivateItems(excludeId: number): void {
-    const stmt = this.db.prepare('DELETE FROM clipboard_items WHERE is_private = 1 AND id != ?');
-    stmt.run(excludeId);
-  }
-
-  // Maintain maximum non-pinned items
-  private maintainMaxItems(): void {
-    // Get items to delete (older than the MAX_ITEMS most recent non-pinned items)
-    const itemsToDelete = this.db.prepare(`
-      SELECT id, cached_file_path FROM clipboard_items 
-      WHERE is_pinned = 0 
-      AND id NOT IN (
-        SELECT id FROM clipboard_items 
-        WHERE is_pinned = 0 
-        ORDER BY created_at DESC 
-        LIMIT ?
-      )
-    `).all(MAX_ITEMS);
+  /**
+   * Clears all non-pinned items or all items
+   */
+  clearItems(clearAll: boolean = false): number {
+    const items = this.db.prepare(
+      clearAll ? 'SELECT * FROM clipboard_items' : 'SELECT * FROM clipboard_items WHERE is_pinned = 0'
+    ).all() as any[];
     
-    // Clean up cached files for items being deleted
-    for (const item of itemsToDelete) {
+    // Clean up cached files
+    for (const item of items) {
       if (item.cached_file_path && existsSync(item.cached_file_path)) {
         try {
           unlinkSync(item.cached_file_path);
         } catch (error) {
-          // Ignore file deletion errors
+          console.warn(`Failed to delete cached file: ${item.cached_file_path}`);
         }
       }
     }
     
-    // Delete the items from database
-    const stmt = this.db.prepare(`
-      DELETE FROM clipboard_items 
-      WHERE is_pinned = 0 
-      AND id NOT IN (
-        SELECT id FROM clipboard_items 
-        WHERE is_pinned = 0 
-        ORDER BY created_at DESC 
-        LIMIT ?
-      )
-    `);
-    stmt.run(MAX_ITEMS);
+    // Workaround for Bun SQLite bug: Use RETURNING to get accurate count
+    const stmt = this.db.prepare(
+      clearAll 
+        ? 'DELETE FROM clipboard_items RETURNING id' 
+        : 'DELETE FROM clipboard_items WHERE is_pinned = 0 RETURNING id'
+    );
+    const deletedRows = stmt.all();
+    const actualChanges = deletedRows.length;
+    
+    // Reset auto-increment counter if clearing all items
+    if (clearAll && actualChanges > 0) {
+      this.db.exec('DELETE FROM sqlite_sequence WHERE name = "clipboard_items"');
+    }
+    
+    return actualChanges;
   }
 
-  // Map database row to ClipboardItem
+  /**
+   * Gets usage statistics
+   */
+  getStats(): { total: number; pinned: number; files: number; cacheSize: string } {
+    const totalStmt = this.db.prepare('SELECT COUNT(*) as count FROM clipboard_items');
+    const pinnedStmt = this.db.prepare('SELECT COUNT(*) as count FROM clipboard_items WHERE is_pinned = 1');
+    const filesStmt = this.db.prepare('SELECT COUNT(*) as count FROM clipboard_items WHERE cached_file_path IS NOT NULL');
+    const cacheSizeStmt = this.db.prepare('SELECT SUM(file_size) as size FROM clipboard_items WHERE file_size IS NOT NULL');
+    
+    const total = (totalStmt.get() as any).count;
+    const pinned = (pinnedStmt.get() as any).count;
+    const files = (filesStmt.get() as any).count;
+    const cacheSize = (cacheSizeStmt.get() as any).size || 0;
+    
+    return {
+      total,
+      pinned,
+      files,
+      cacheSize: this.formatFileSize(cacheSize)
+    };
+  }
+
+
+  /**
+   * Closes the database connection
+   */
+  close(): void {
+    this.db.close();
+  }
+
+  // Private helper methods
+
   private mapRowToItem(row: any): ClipboardItem {
     return {
       id: row.id,
@@ -429,32 +381,75 @@ export class ClipboardDatabase {
     };
   }
 
-  // Get database stats
-  getStats(): { total: number; pinned: number; private: number } {
-    const totalStmt = this.db.prepare('SELECT COUNT(*) as count FROM clipboard_items');
-    const pinnedStmt = this.db.prepare('SELECT COUNT(*) as count FROM clipboard_items WHERE is_pinned = 1');
-    const privateStmt = this.db.prepare('SELECT COUNT(*) as count FROM clipboard_items WHERE is_private = 1');
+  private generatePreview(content: string, contentType: string, fileName?: string, fileSize?: number): string {
+    if (contentType === 'text' || contentType === 'html') {
+      return content.slice(0, PREVIEW_LENGTH) + (content.length > PREVIEW_LENGTH ? '...' : '');
+    }
     
-    return {
-      total: (totalStmt.get() as any).count,
-      pinned: (pinnedStmt.get() as any).count,
-      private: (privateStmt.get() as any).count
-    };
+    if (fileName && fileSize !== undefined) {
+      const size = this.formatFileSize(fileSize);
+      return `📁 ${fileName} (${size})`;
+    }
+    
+    return contentType;
   }
 
-  // Get cached file path for an item
-  getCachedFilePath(id: number): string | null {
-    const item = this.getItem(id);
-    if (!item?.cached_file_path) return null;
+  private getContentTypeFromFile(filePath: string): ClipboardItem['content_type'] {
+    const ext = extname(filePath).toLowerCase();
     
-    // Verify file still exists
-    if (!existsSync(item.cached_file_path)) return null;
+    if (IMAGE_EXTENSIONS.includes(ext)) {
+      return 'image_file';
+    }
     
-    return item.cached_file_path;
+    if (VIDEO_EXTENSIONS.includes(ext)) {
+      return 'video_file';
+    }
+    
+    return 'document_file';
   }
 
-  // Close database connection
-  close(): void {
-    this.db.close();
+  private getMimeType(filePath: string): string {
+    const ext = extname(filePath).toLowerCase();
+    return MIME_TYPES[ext] || 'application/octet-stream';
+  }
+
+  private formatFileSize(bytes: number): string {
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = bytes;
+    let unitIndex = 0;
+    
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex++;
+    }
+    
+    return `${size.toFixed(1)}${units[unitIndex]}`;
+  }
+
+  private cleanupExpiredPrivateItems(): void {
+    // Delete private items older than 1 hour
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const stmt = this.db.prepare('SELECT * FROM clipboard_items WHERE is_private = 1 AND created_at < ?');
+    const expiredItems = stmt.all(oneHourAgo) as any[];
+    
+    for (const item of expiredItems) {
+      this.deleteItem(item.id);
+    }
+  }
+
+  private maintainItemLimit(): void {
+    // Keep only the latest MAX_ITEMS non-pinned items
+    const stmt = this.db.prepare(`
+      SELECT id FROM clipboard_items 
+      WHERE is_pinned = 0 
+      ORDER BY created_at DESC 
+      LIMIT -1 OFFSET ?
+    `);
+    
+    const excessItems = stmt.all(MAX_ITEMS) as any[];
+    
+    for (const item of excessItems) {
+      this.deleteItem(item.id);
+    }
   }
 }

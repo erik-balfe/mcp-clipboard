@@ -19,6 +19,7 @@ USER bun
 # Environment
 ENV NODE_ENV=production
 ENV MCP_CLIPBOARD_DATA_DIR=/app/data
+ENV DOCKER_CONTAINER=true
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
