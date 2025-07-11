@@ -317,7 +317,7 @@ class ClipboardServer {
       throw new McpError(ErrorCode.InvalidParams, 'Content cannot be empty');
     }
     
-    const item = this.db.addItem(content, content_type, isPrivate);
+    const item = this.db.addTextItem(content, content_type as 'text' | 'html', isPrivate);
     
     return {
       content: [
@@ -340,7 +340,8 @@ class ClipboardServer {
         throw new McpError(ErrorCode.InvalidParams, `Clipboard item with ID ${id} not found`);
       }
     } else {
-      item = this.db.getLatestItem();
+      const items = this.db.listItems(1);
+      item = items.length > 0 ? items[0] : null;
       if (!item) {
         throw new McpError(ErrorCode.InvalidParams, 'Clipboard is empty');
       }
@@ -358,7 +359,7 @@ class ClipboardServer {
 
   private async handleList(args: ListToolArguments) {
     const { limit = 30 } = args;
-    const items = this.db.getAllItems(limit);
+    const items = this.db.listItems(limit, true);
     
     if (items.length === 0) {
       return {
@@ -384,13 +385,18 @@ class ClipboardServer {
       return `${pinnedIcon}${privateIcon}${typeIcon} ID:${item.id} | ${item.preview} (${item.created_at})`;
     }).join('\n');
     
-    const stats = this.db.getStats();
+    const allItems = this.db.listItems(Number.MAX_SAFE_INTEGER, true);
+    const stats = {
+      total_items: allItems.length,
+      pinned_items: allItems.filter(item => item.is_pinned).length,
+      private_items: allItems.filter(item => item.is_private).length
+    };
     
     return {
       content: [
         {
           type: 'text',
-          text: `📋 Clipboard History (${stats.total} items, ${stats.pinned} pinned)\n\n${itemsList}\n\n💡 Use clipboard_paste with an ID to get the full content`,
+          text: `📋 Clipboard History (${stats.total_items} items, ${stats.pinned_items} pinned)\n\n${itemsList}\n\n💡 Use clipboard_paste with an ID to get the full content`,
         },
       ],
     };
@@ -470,7 +476,11 @@ class ClipboardServer {
       throw new McpError(ErrorCode.InvalidParams, `Clipboard item with ID ${id} not found`);
     }
     
-    const success = this.db.togglePin(id);
+    const currentItem = this.db.getItem(id);
+    if (!currentItem) {
+      throw new McpError(ErrorCode.InvalidParams, `Clipboard item with ID ${id} not found`);
+    }
+    const success = this.db.pinItem(id, !currentItem.is_pinned);
     if (!success) {
       throw new McpError(ErrorCode.InternalError, 'Failed to toggle pin status');
     }
@@ -492,7 +502,7 @@ class ClipboardServer {
   private async handleClear(args: ClearToolArguments) {
     const { clear_all = false } = args;
     
-    const deletedCount = clear_all ? this.db.clearAll() : this.db.clearHistory();
+    const deletedCount = this.db.clearItems(clear_all || false);
     const message = clear_all 
       ? `🗑️ Cleared all clipboard items (${deletedCount} items removed)`
       : `🗑️ Cleared clipboard history (${deletedCount} items removed, pinned items kept)`;
@@ -508,7 +518,12 @@ class ClipboardServer {
   }
 
   private async handleStats() {
-    const stats = this.db.getStats();
+    const allItems = this.db.listItems(Number.MAX_SAFE_INTEGER, true);
+    const stats = {
+      total_items: allItems.length,
+      pinned_items: allItems.filter(item => item.is_pinned).length,
+      private_items: allItems.filter(item => item.is_private).length
+    };
     
     return {
       content: [
@@ -528,7 +543,7 @@ class ClipboardServer {
     }
     
     try {
-      const item = this.db.addFile(file_path, isPrivate);
+      const item = this.db.addFileItem(file_path, isPrivate);
       
       return {
         content: [
@@ -565,7 +580,11 @@ class ClipboardServer {
       };
     }
     
-    const cachedPath = this.db.getCachedFilePath(id);
+    const clipboardItem = this.db.getItem(id);
+    if (!clipboardItem || !clipboardItem.cached_file_path) {
+      throw new McpError(ErrorCode.InvalidParams, `Cached file for clipboard item ${id} not found`);
+    }
+    const cachedPath = clipboardItem.cached_file_path;
     if (!cachedPath) {
       throw new McpError(ErrorCode.InvalidParams, `Cached file not found for item ${id}`);
     }
